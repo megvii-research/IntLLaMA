@@ -1,5 +1,4 @@
-# IntLLaMA: A fast and light quantization solution for LLaMA [TechReport]()
-
+# IntLLaMA: A fast and light quantization solution for LLaMA
 
 ## Introduction
 IntLLaMA, a fast and light quantization solution reduces gpu-memory requirement and improve computational efficiency while simultaneously preserving model intelligence. Specifically, IntLLaMA facilitates a quantization-friendly distribution of hidden-states by utilizing Random Centralization to address the asymmetry and mitigate the impact of outliers. Meanwhile, Hessian-weighted Singular Value Decomposition(HSVD) is further proposed to compensate for the performance degradation caused by representing the model weights using low bit-width. Benefits from RandC and HSVD, IntLLaMA quantize the weight into 4 bit-width, hidden-state into 8 bit-width sperately and close to full-precision performance in perplexity and MMLU accuracy. 
