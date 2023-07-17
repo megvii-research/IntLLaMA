@@ -4,7 +4,7 @@ BIT_WIDTH=$2
 
 python3 convert.py \
     --model_name  huggyllama/llama-$1 \
-    --calib_data ./sources/c4-eos-128-calib.json \
+    --calib_data ./sources/calibration_dataset.json \
     --nsample 128 \
     --bit_width 4 \
     --is_perchannel \
@@ -16,11 +16,11 @@ python3 convert.py \
     --input_bit $2 \
     --enable_input_quant \
     --enable_random_project \
-    --load_awq ../sources/smooth_scales/llama-$1-w4-g128-scale.pt \
+    --enable_smooth \
+    --load_scales ./sources/smooth_scales/llama-$1-w4-g128-scale.pt \
     --svd_deltaW_rank 8 \
     --enable_svd_deltaW \
     #--true_sequential \
-    #--enable_smooth \
 
 ### baseline wi gscales_decompose
 #python3 convert.py \

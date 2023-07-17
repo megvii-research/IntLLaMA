@@ -58,14 +58,20 @@ class Smoothor(object):
         self.act_scales = act_scales
         self.model.cpu()
 
-    def smooth(self):
+    def smooth(self, scales_dict=None):
         for n, m in self.model.named_modules():
             if isinstance(m, LlamaDecoderLayer):
                 qkv = [m.self_attn.q_proj, m.self_attn.k_proj, m.self_attn.v_proj]
-                #self.smooth_ln_linears(m.input_layernorm, qkv, self.act_scales[n+".self_attn.q_proj"], n+".self_attn.qkv")
-                self.smooth_two_linears(m.self_attn.v_proj, m.self_attn.o_proj, self.act_scales[n+".self_attn.o_proj"])
-                #self.smooth_ln_linears(m.post_attention_layernorm, [m.mlp.up_proj, m.mlp.gate_proj], self.act_scales[n+".mlp.up_proj"])
-                self.smooth_two_linears(m.mlp.up_proj, m.mlp.down_proj, self.act_scales[n+".mlp.down_proj"])
+                if scales_dict:
+                    scale_vo = scales_dict[n+".self_attn.o_proj"]
+                    scale_updown = scales_dict[n+".mlp.down_proj"]
+                    self.smooth_two_linears(m.self_attn.v_proj, m.self_attn.o_proj, scale_vo, smooth_scales=scale_vo) # a workaround
+                    self.smooth_two_linears(m.mlp.up_proj, m.mlp.down_proj, scale_updown, smooth_scales=scale_updown)
+                else:
+                    scale_vo = self.act_scales[n+".self_attn.o_proj"]
+                    scale_updown = self.act_scales[n+".mlp.down_proj"]
+                    self.smooth_two_linears(m.self_attn.v_proj, m.self_attn.o_proj, act_scales=scale_vo)
+                    self.smooth_two_linears(m.mlp.up_proj, m.mlp.down_proj, act_scales=scale_updown)
 
     def calc_smooth_scales(self, weight, a_scales):
         w_scales = weight.abs().max(axis=0)[0].float().clamp(min=1e-5)

@@ -19,9 +19,7 @@ from tqdm import tqdm
 
 from utils import GptQuantizer, QuantLinear, RandomProjector, register_fake_quant_input_hook, Smoothor, fake_quant_input
 from utils.datasets import get_wikitext2, get_c4
-from awq.quantize.auto_scale import apply_scale
-
-from evaluate_mmlu import eval_mmlu
+#from evaluate_mmlu import eval_mmlu
 
 tokenizer_replace_dict = {
     "decapoda-research/llama-7b-hf": "huggyllama/llama-7b",
@@ -322,7 +320,7 @@ if __name__ == "__main__":
         help='Whether to run in true sequential model.'
     )
     parser.add_argument(
-        "--load_awq",
+        "--load_scales",
         type=str,
         default="",
     )
@@ -353,15 +351,19 @@ if __name__ == "__main__":
     model.eval()
     model.config.use_cache = False
 
-    if args.load_awq:
-        print("Loading pre-computed AWQ results from", args.load_awq)
-        awq_results = torch.load(args.load_awq)
-        new_awq_scales = []
-        for prev_op_name, layer_names, scales in awq_results["scale"]:
-            if "layernorm" in prev_op_name:
-                continue
-            new_awq_scales.append((prev_op_name, layer_names, scales))
-        apply_scale(model, new_awq_scales)
+    if args.enable_smooth:
+        print("Run Smooth")
+        model.cuda()  # speedup, but also can use cpu
+        smoothor = Smoothor(model, device, alpha=0.5, calib_mode="max")
+        if args.load_scales:
+            scales = {layer_names[0]: scale for (prev_op_name, layer_names, scale) in torch.load(args.load_scales)}
+            smoothor.smooth(scales)
+        else:
+            with open(args.calib_data, "r") as f:
+                calibration_data = [torch.tensor(data) for data in json.loads(f.read())]
+            smoothor.calibrate_for_act_scales(calibration_data)
+            smoothor.smooth()
+        model.cpu()
 
     if args.enable_random_project:
         print("Run Random Project")
@@ -373,15 +375,6 @@ if __name__ == "__main__":
         model.cuda()  # speedup, but also can use cpu
         model = projector.project(model)
         model.cpu()
-
-    if args.enable_smooth:
-        assert not args.load_awq, "awq and smooth can not both exist"
-        print("Run Smooth Quant")
-        smoothor = Smoothor(model, device, alpha=0.5, calib_mode="max")
-        with open(args.calib_data, "r") as f:
-            calibration_data = [torch.tensor(data) for data in json.loads(f.read())]
-        smoothor.calibrate_for_act_scales(calibration_data)
-        smoothor.smooth()
 
     model, quantizers, svd_deltaW = convert(args, model, tokenizer, device)
 
