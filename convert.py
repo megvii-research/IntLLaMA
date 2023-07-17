@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # =======================================
 # File Name :
-# Purpose : convert fp16 models into qmodel
+# Purpose : convert fp16 models into qmodel via GPTQ
 # Creation Date :
 # Last Modified :
 # =======================================
@@ -17,10 +17,11 @@ import numpy as np
 from datasets import load_dataset
 from tqdm import tqdm
 
-from utils import GptQuantizer, QuantLinear, RandomProjector, register_fake_quant_input_hook, Smoothor
+from utils import GptQuantizer, QuantLinear, RandomProjector, register_fake_quant_input_hook, Smoothor, fake_quant_input
 from utils.datasets import get_wikitext2, get_c4
+from awq.quantize.auto_scale import apply_scale
 
-#from evaluate_mmlu import eval_mmlu
+from evaluate_mmlu import eval_mmlu
 
 tokenizer_replace_dict = {
     "decapoda-research/llama-7b-hf": "huggyllama/llama-7b",
@@ -248,6 +249,7 @@ if __name__ == "__main__":
         help="a tiny eval dataset for debug",
     )
     parser.add_argument("--bit_width", type=int, default=4, choices=[4, 2])
+    parser.add_argument("--input_bit", type=int, default=4, choices=[8, 4, 2])
     parser.add_argument("--is_perchannel", action="store_true")
     parser.add_argument("--is_symetric", action="store_true")
     parser.add_argument(
@@ -319,6 +321,11 @@ if __name__ == "__main__":
         '--true_sequential', action='store_true',
         help='Whether to run in true sequential model.'
     )
+    parser.add_argument(
+        "--load_awq",
+        type=str,
+        default="",
+    )
 
     args = parser.parse_args()
 
@@ -346,6 +353,16 @@ if __name__ == "__main__":
     model.eval()
     model.config.use_cache = False
 
+    if args.load_awq:
+        print("Loading pre-computed AWQ results from", args.load_awq)
+        awq_results = torch.load(args.load_awq)
+        new_awq_scales = []
+        for prev_op_name, layer_names, scales in awq_results["scale"]:
+            if "layernorm" in prev_op_name:
+                continue
+            new_awq_scales.append((prev_op_name, layer_names, scales))
+        apply_scale(model, new_awq_scales)
+
     if args.enable_random_project:
         print("Run Random Project")
         model_arch = args.model_name.split("/")[-1]
@@ -358,6 +375,7 @@ if __name__ == "__main__":
         model.cpu()
 
     if args.enable_smooth:
+        assert not args.load_awq, "awq and smooth can not both exist"
         print("Run Smooth Quant")
         smoothor = Smoothor(model, device, alpha=0.5, calib_mode="max")
         with open(args.calib_data, "r") as f:
@@ -372,13 +390,13 @@ if __name__ == "__main__":
         tokenizer.save_pretrained(os.path.join(args.output_dir, "fakequant_checkpoint"))
 
     # evaluation
-    #if args.enable_mmlu_evaluation:
-    #    print("Run mmlu evaluation")
-    #    model.cuda()
-    #    hooks = register_fake_quant_input_hook(args, model)
-    #    eval_mmlu(model, args.model_name, tokenizer)
-    #    hooks.clear()
-    #    model.cpu()
+    if args.enable_mmlu_evaluation:
+        print("Run mmlu evaluation")
+        model.cuda()
+        hooks = register_fake_quant_input_hook(args, model)
+        eval_mmlu(model, args.model_name, tokenizer)
+        hooks.clear()
+        model.cpu()
 
     replace_linear2qlinear(model, quantizers, svd_deltaW)
 
